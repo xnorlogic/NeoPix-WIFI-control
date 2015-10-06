@@ -1,0 +1,367 @@
+#include <Adafruit_NeoPixel.h>
+#include <avr/power.h>
+#include <Adafruit_CC3000.h>
+#include <ccspi.h>
+#include <SPI.h>
+#include <string.h>
+#include "utility/debug.h"
+
+// These are the interrupt and control pins
+#define ADAFRUIT_CC3000_IRQ   3  // MUST be an interrupt pin!
+// These can be any two pins
+#define ADAFRUIT_CC3000_VBAT  5
+#define ADAFRUIT_CC3000_CS    10
+// Use hardware SPI for the remaining pins
+// On an UNO, SCK = 13, MISO = 12, and MOSI = 11
+Adafruit_CC3000 cc3000 = Adafruit_CC3000(ADAFRUIT_CC3000_CS, ADAFRUIT_CC3000_IRQ, ADAFRUIT_CC3000_VBAT,
+                         SPI_CLOCK_DIVIDER); // you can change this clock speed
+
+#define WLAN_SSID       "HomeNet"           // cannot be longer than 32 characters!
+#define WLAN_PASS       "thisismyhome"
+// Security can be WLAN_SEC_UNSEC, WLAN_SEC_WEP, WLAN_SEC_WPA or WLAN_SEC_WPA2
+#define WLAN_SECURITY   WLAN_SEC_WPA2
+
+#define IDLE_TIMEOUT_MS  5000      // Amount of time to wait (in milliseconds) with no Data 
+// received before closing the connection.  If you know the server
+// you're accessing is quick to respond, you can reduce this value.
+
+//Server Response Status-----------------------------
+//http://192.168.1.74:5000/arduino:1%24request:status
+#define WEBSITE      "192.168.1.74"
+#define WEBPAGE      "/arduino:1%24request:status"
+//---------------------------------------------------
+
+#define PIN 6       	//PIN for NEON Light control (NEOpiXel)
+#define Enable 7    	//PIN for system Enable (RELAY)
+#define Conection 4 	//PIN for conection status display (LED)
+#define Local_Mode 8	//PIN for local mode control (Switch)
+#define Local_Mode_RED  14  //A0 PIN for local mode control RED ANALOG VALUE (POT)
+#define Local_Mode_GREEN 15 //A1 PIN for local mode control GREEN ANALOG VALUE (POT)
+#define Local_Mode_BLUE 16  //A2 PIN for local mode control BLUE ANALOG VALUE (POT)
+
+//Server IP Adress----------------------
+uint32_t ip = 3232235850; //192.168.1.74
+//--------------------------------------
+
+uint8_t Buff[5];
+uint32_t Data = 0;
+uint8_t Data_Start = 6;
+bool Connection_Flag = FALSE;
+bool Enable_Relay = FALSE;
+int Local_Control_Activation = 0;
+
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(240, PIN, NEO_GRB + NEO_KHZ800);
+
+void setup(void){
+
+  pinMode(Enable, OUTPUT);      // sets the digital pin as output
+  pinMode(Conection, OUTPUT);      // sets the digital pin as output
+  pinMode(Local_Mode, INPUT);      // sets the digital pin as output
+
+  Serial.begin(115200);
+  
+  //CONECTION PROCESS-------------------------------------------------------- 
+  /* Initialise the module */
+  //Future function for this......
+  Serial.println(F("\nInitializing..."));
+  if (!cc3000.begin())
+  {
+    Serial.println(F("Couldn't begin()! Check your wiring?"));
+    while (1);
+  }
+
+  Serial.print(F("\nAttempting to connect to ")); Serial.println(WLAN_SSID);
+  if (!cc3000.connectToAP(WLAN_SSID, WLAN_PASS, WLAN_SECURITY)) {
+    Serial.println(F("Failed!"));
+    while (1);
+  }
+
+  Serial.println(F("Connected!"));
+  Connection_Flag = TRUE;
+
+  /* Wait for DHCP to complete */
+  Serial.println(F("Request DHCP"));
+  while (!cc3000.checkDHCP())
+  {
+    delay(100); // ToDo: Insert a DHCP timeout!
+  }
+
+  /* Display the IP address DNS, Gateway, etc. */
+  while (! DISP_CONNECTION_DETAILS()) {
+    delay(1000);
+  }
+
+  //Serial.println(ip, DEC);
+  cc3000.printIPdotsRev(ip);
+  //------------------------------------------------------------------------- 
+
+  strip.begin();
+  strip.show(); // Initialize all pixels to 'off'
+
+}
+
+void loop(void){
+    
+	Local_Control_Activation = digitalRead(Local_Mode);
+	Adafruit_CC3000_Client ArduinioCLIENT_1 = cc3000.connectTCP(ip, 5000);
+	
+	if(!Connection_Flag && Local_Control_Activation){ //LOCAL MODE ACTIVATION
+	
+		ArduinioCLIENT_1.close();                     //Make sure to close the client
+		cc3000.disconnect();                          //Disconnect from WiFi
+		
+		//CODE for Local mode control
+		while(Local_Control_Activation){
+		   
+		    //Control code here....
+		
+			Local_Control_Activation = digitalRead(Local_Mode);
+		}
+		//END local control mode
+		
+		Connection_Flag = FALSE;                      //Mantain the conection closed
+	}
+	else{                                             //REMOTE MODE ACTIVATION
+		if (!Connection_Flag){                        //Failed Connection or failed client connection
+        
+			digitalWrite(Conection, LOW);
+			
+			ArduinioCLIENT_1.close();
+			cc3000.disconnect();
+			
+			Connection_Flag = FALSE;
+
+			//CONECTION PROCESS-------------------------------------------------------- 
+			/* Initialise the module */
+			//Future function for this......
+			Serial.println(F("\nRECONECTION AND Initializing..."));
+			if (!cc3000.begin())
+			{
+				Serial.println(F("Couldn't begin()! Check your wiring?"));
+				while (1);
+			}
+
+			Serial.print(F("\nAttempting to connect to ")); Serial.println(WLAN_SSID);
+			if (!cc3000.connectToAP(WLAN_SSID, WLAN_PASS, WLAN_SECURITY)) {
+				Serial.println(F("Failed!"));
+				while (1);
+			}
+
+			Serial.println(F("Connected!"));
+			Connection_Flag = TRUE;
+
+			//Wait for DHCP to complete
+			Serial.println(F("Request DHCP"));
+			while (!cc3000.checkDHCP()){
+				delay(100); // ToDo: Insert a DHCP timeout!
+			}
+
+			/* Display the IP address DNS, Gateway, etc. */
+			while (! DISP_CONNECTION_DETAILS()) {
+				delay(1000);
+			}
+
+			//Serial.println(ip, DEC);
+			cc3000.printIPdotsRev(ip);
+			//------------------------------------------------------------------------- 
+		}
+		else {                                        //Connected to client and network               
+			if (ArduinioCLIENT_1.connected()) {
+			
+				//Send de request to the server
+				//Future function for this......
+				ArduinioCLIENT_1.fastrprint(F("GET "));
+				ArduinioCLIENT_1.fastrprint(WEBPAGE);
+				ArduinioCLIENT_1.fastrprint(F(" HTTP/1.1\r\n"));
+				ArduinioCLIENT_1.fastrprint(F("Host: "));
+				ArduinioCLIENT_1.fastrprint(WEBSITE);
+				ArduinioCLIENT_1.fastrprint(F("\r\n"));
+				ArduinioCLIENT_1.fastrprint(F("\r\n"));
+				//www.println();
+				Connection_Flag = TRUE;
+				digitalWrite(Conection, HIGH);
+			}
+			else {
+				Serial.println(F("Connection failed"));
+				Connection_Flag = FALSE;
+				return;
+			}
+			//------------------------------------------------
+				
+			Buff = EXTRACT_DATA(ArduinioCLIENT_1, Data_Start);
+		
+			//     Serial.println('L');
+			//     Serial.println(Buff[0]);
+			//     Serial.println(Buff[1]);
+			//     Serial.println(Buff[2]);
+			//     Serial.println(Buff[3]);
+			//     Serial.println(Buff[4]);
+
+			Data = DATA2U32(Buff[1], Buff[2], Buff[3], Buff[4]);
+			
+			Enable_Relay = ENABLE_SYSTEM(Buff[1], 49, 48); //ASCII vals from SERVER response
+			
+			if (!Enable_Relay){
+				ArduinioCLIENT_1.close();
+			}
+			
+			Connection_Flag = FUNCTION_SELECT(Data,Connection_Flag,ArduinioCLIENT_1);
+		}
+	}
+	
+}
+//Data encapsulation
+uint32_t DATA2U32(uint8_t S, uint8_t C1, uint8_t C2, uint8_t C3) {
+
+  uint32_t Data = S;
+  Data <<= 8;
+  Data |= C1;
+  Data <<= 8;
+  Data |= C2;
+  Data <<= 8;
+  Data |= C3;
+
+  return Data;
+}
+//FLAG set and color select
+bool FUNCTION_SELECT(uint32_t Data, bool Connection_Flag, Adafruit_CC3000_Client ArduinioCLIENT_1){
+		  bool FLAG=Connection_Flag;
+		  switch (Data)
+		  {
+			case 825241648:
+			  COLOR_WIPE(strip.Color(255, 255, 255), 10);// 0
+			  Serial.println(F("WHITE"));
+			  ArduinioCLIENT_1.close();
+			  break;
+			case 825241649:
+			  COLOR_WIPE(strip.Color(255, 0, 0), 10);    // 1
+			  Serial.println(F("RED"));
+			  ArduinioCLIENT_1.close();
+			  break;
+			case 825241904:
+			  COLOR_WIPE(strip.Color(0, 255, 0), 10);    // 2
+			  Serial.println(F("GREEN"));
+			  ArduinioCLIENT_1.close();
+			  break;
+			case 825241905:
+			  COLOR_WIPE(strip.Color(0, 0, 255), 10);    // 3
+			  Serial.println(F("BLUE"));
+			  ArduinioCLIENT_1.close();
+			  break;
+			case 825307184:
+			  COLOR_WIPE(strip.Color(255, 0, 255), 10);  // 4
+			  Serial.println(F("VIOLET"));
+			  ArduinioCLIENT_1.close();
+			  break;
+			case 825307185:
+			  COLOR_WIPE(strip.Color(255, 255, 0), 10);  // 5
+			  Serial.println(F("YELLOW"));
+			  ArduinioCLIENT_1.close();
+			  break;
+			case 825307440:
+			  COLOR_WIPE(strip.Color(0, 255, 255), 10);  // 6
+			  Serial.println(F("CYAN"));
+			  ArduinioCLIENT_1.close();
+			  break;
+			case 825307441:
+			  COLOR_WIPE(strip.Color(60, 20, 100), 10);  // 7
+			  Serial.println(F("PURPLE"));
+			  ArduinioCLIENT_1.close();
+			  break;
+			case 808464432:                             //KILL CONECTION 0 
+			  Serial.println(F("\n\nDisconnecting"));
+			  delay(2000);
+			  ArduinioCLIENT_1.close();
+			  delay(2000);
+			  cc3000.disconnect();
+			  delay(2000);
+			  Serial.println(F("\n\nConection killed"));
+			  delay(2000);
+			  FLAG = FALSE;
+			  break;
+		  }
+		  return FLAG;
+	 }
+//Tries to read the IP address and other connection details
+bool DISP_CONNECTION_DETAILS(void){
+  uint32_t ipAddress, netmask, gateway, dhcpserv, dnsserv;
+
+  if (!cc3000.getIPAddress(&ipAddress, &netmask, &gateway, &dhcpserv, &dnsserv))
+  {
+    Serial.println(F("Unable to retrieve the IP Address!\r\n"));
+    return false;
+  }
+  else
+  {
+    Serial.print(F("\nIP Addr: ")); cc3000.printIPdotsRev(ipAddress);
+    Serial.print(F("\nNetmask: ")); cc3000.printIPdotsRev(netmask);
+    Serial.print(F("\nGateway: ")); cc3000.printIPdotsRev(gateway);
+    Serial.print(F("\nDHCPsrv: ")); cc3000.printIPdotsRev(dhcpserv);
+    Serial.print(F("\nDNSserv: ")); cc3000.printIPdotsRev(dnsserv);
+    Serial.println();
+    return true;
+  }
+}
+//Fill the dots one after the other with a color
+void COLOR_WIPE(uint32_t c, uint8_t wait) {
+  for (uint16_t i = 0; i < strip.numPixels(); i++) {
+    strip.setPixelColor(i, c);
+    strip.show();
+    delay(wait);
+  }
+}
+//Prototype Decode
+bool ENABLE_SYSTEM(uint8_t Data_Rx, uint8_t DataIF_ON, uint8_t DataIF_OFF){
+  bool Enable_Relay=FALSE;
+  if (Data_Rx == DataIF_ON) {
+    digitalWrite(Enable, HIGH);   // RELAY ON
+	Enable_Relay=TRUE;
+    //Serial.println(F("RELAY ON"));
+  }
+  else if (Data_Rx == DataIF_OFF) {
+    digitalWrite(Enable, LOW);   // RELAY OFF
+	Enable_Relay=FALSE;
+    //Serial.println(F("RELAY OFF"));
+  }
+  return Enable_Relay;
+}
+//Data extractor from the server response
+uint8_t EXTRACT_DATA(Adafruit_CC3000_Client ArduinioCLIENT_1, uint8_t Data_Start){
+		uint8_t Buff[5];
+		Buff[0] = 0;
+		Buff[1] = 0;
+		Buff[2] = 0;
+		Buff[3] = 0;
+		Buff[4] = 0;
+		//Extract Data from the SERVER response----------------------------------------------
+		/* Read Data until either the connection is closed, or the idle timeout is reached.*/
+		unsigned long lastRead = millis();
+		int DataCNT1 = 0;
+		int DataCNT2 = 0;
+		int i = 0;
+		while (ArduinioCLIENT_1.connected() && (millis() - lastRead < IDLE_TIMEOUT_MS)) {
+			while (ArduinioCLIENT_1.available()) {
+				char c;
+				c = ArduinioCLIENT_1.read();
+				if (c == 10) { //brake line identifier
+					DataCNT1++;
+					//                Serial.println('j');
+					//                Serial.print(DataCNT1);
+				}
+				if (c == 13) { //brake line identifier
+					DataCNT2++;
+					//                Serial.println('P');
+					//                Serial.print(DataCNT2);
+				}
+				if (DataCNT1 == Data_Start && DataCNT2 == Data_Start) {
+					//                Serial.print(c);
+					//                Serial.println(i);				
+					Buff[i] = atoi(c);
+					i++;
+				}
+				lastRead = millis();
+			}
+		}
+		return Buff;
+		//-----------------------------------------------------------------------------------
+}
